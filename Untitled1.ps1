@@ -1,25 +1,27 @@
-﻿# 1. Visual Intro (ASCII Art & Loading)
+# 1. Visual Intro (3D Neon ASCII Art & Loading)
 Clear-Host
-Write-Host @"
-  ________  ________  ___  ___  ___     
- /  _____/ /  _____/ /  / /  / /  /     
-/   \  ___/   \  ___/  / /  / /  /      
-\    \_\  \    \_\  \  /_/  /_/  /       
- \______  /\______  /___/___/___/        
-        \/        \/                     
-      [ ASSET DOWNLOADER v1.0 ]
-"@ -ForegroundColor Cyan
 
-Write-Host "`nInitializing G.GUI modules..." -ForegroundColor Gray
-$loadBar = "[####################]"
+$neonG = @"
+  ██████╗      ██████╗ ██╗   ██╗ ██╗
+ ██╔════╝     ██╔════╝ ██║   ██║ ██║
+ ██║  ███╗    ██║  ███╗██║   ██║ ██║
+ ██║   ██║    ██║   ██║██║   ██║ ██║
+ ╚██████╔╝ ██╗╚██████╔╝╚██████╔╝ ██║
+  ╚═════╝  ╚═╝ ╚═════╝  ╚═════╝  ╚═╝
+"@
+
+Write-Host $neonG -ForegroundColor Cyan
+Write-Host "      [ G.GUI ASSET DOWNLOADER v1.0 ]`n" -ForegroundColor White
+
+Write-Host "Initializing G.GUI modules..." -ForegroundColor Gray
 for ($i = 1; $i -le 20; $i++) {
     Write-Progress -Activity "Loading G.GUI System" -Status "$($i*5)%" -PercentComplete ($i*5)
-    Start-Sleep -Milliseconds 200
+    Start-Sleep -Milliseconds 100
 }
-Write-Host "System Ready.`n" -ForegroundColor Green
+Write-Host "System Online.`n" -ForegroundColor Green
 
 # 2. User Input
-$url = Read-Host "Enter the website URL (e.g., https://example.com)"
+$url = Read-Host "Enter the website URL (e.g., example.com)"
 if ($url -notmatch "^http") { $url = "https://" + $url }
 
 $destination = "$HOME\Downloads\SiteAssets"
@@ -71,5 +73,5 @@ try {
 }
 
 Write-Host "`n------------------------------------"
-Write-Host "Task Complete. Files are in Downloads\SiteAssets" -ForegroundColor Yellow
+Write-Host "Task Complete. Check Downloads\SiteAssets" -ForegroundColor Yellow
 pause
