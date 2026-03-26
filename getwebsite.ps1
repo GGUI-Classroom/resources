@@ -9,84 +9,88 @@ $neonG = @"
   ╚═════╝  ╚═╝ ╚═════╝  ╚═════╝  ╚═╝
 "@
 Write-Host $neonG -ForegroundColor Cyan
-Write-Host "      [ G.GUI DEEP SCAN & CLONE v2.0 ]`n" -ForegroundColor White
+Write-Host "      [ G.GUI ULTRA-DEEP SCAN v3.0 ]`n" -ForegroundColor White
 
-# 2. Setup
+# 2. Configuration
 $inputUrl = Read-Host "Enter the website URL"
 if ($inputUrl -notmatch "^http") { $inputUrl = "https://" + $inputUrl }
 $baseUrl = $inputUrl.TrimEnd('/')
+$domain = ([System.Uri]$baseUrl).Host
 
 $destination = "$HOME\Downloads\SiteAssets"
 if (!(Test-Path $destination)) { New-Item -ItemType Directory -Path $destination -Force }
 
-$agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edge/120.0.0.0"
+$agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $queue = [System.Collections.Generic.Queue[string]]::new()
 $queue.Enqueue($baseUrl)
 $visited = [System.Collections.Generic.HashSet[string]]::new()
 
-Write-Host "`n[!] Starting deep crawl on: $baseUrl" -ForegroundColor Yellow
-
 # 3. Execution Logic
 while ($queue.Count -gt 0) {
     $currentUrl = $queue.Dequeue()
     
-    # Skip if already visited or if it's an external link
-    if ($visited.Contains($currentUrl) -or ($currentUrl -notmatch $baseUrl.Replace(".", "\."))) { continue }
-    $visited.Add($currentUrl) | Out-Null
+    # Normalize URL to prevent duplicates (remove trailing slash and fragments)
+    $normalizedUrl = $currentUrl.Split('#')[0].TrimEnd('/')
+    if ($visited.Contains($normalizedUrl)) { continue }
+    $visited.Add($normalizedUrl) | Out-Null
 
     try {
-        Write-Host "Processing: $currentUrl" -ForegroundColor Gray
-        $response = Invoke-WebRequest -Uri $currentUrl -UserAgent $agent -UseBasicParsing -ErrorAction Stop
+        Write-Host "[SCANNING] $normalizedUrl" -ForegroundColor Gray
+        $response = Invoke-WebRequest -Uri $normalizedUrl -UserAgent $agent -UseBasicParsing -ErrorAction Stop
         
-        # 4. Save the HTML Page
-        $fileName = $currentUrl.Replace($baseUrl, "").Trim('/')
-        if (!$fileName -or $fileName -eq "") { $fileName = "index.html" }
+        # Determine Filename (Handle home page vs sub-pages)
+        $uri = [System.Uri]$normalizedUrl
+        $path = $uri.AbsolutePath.Trim('/')
+        $fileName = if ([string]::IsNullOrWhiteSpace($path)) { "index.html" } else { $path.Replace('/', '_') }
         if ($fileName -notmatch "\.(html|php|asp)$") { $fileName += ".html" }
-        # Replace slashes in filename to prevent path errors
-        $safeFileName = $fileName.Replace("/", "_")
         
-        $response.Content | Out-File -FilePath "$destination\$safeFileName" -Encoding utf8
-        Write-Host "  [+] Saved Page: $safeFileName" -ForegroundColor Green
+        # Save the HTML
+        $response.Content | Out-File -FilePath "$destination\$fileName" -Encoding utf8
+        Write-Host "  [+] HTML Saved: $fileName" -ForegroundColor Green
 
-        # 5. Scan for EVERYTHING (Links and Assets)
-        $rawHtml = $response.Content
-        # Improved Regex to catch almost any path in src or href
-        $pattern = '(?<=href="|src=")[^"#\s>]+'
-        $matches = [regex]::Matches($rawHtml, $pattern)
+        # 4. Global Regex Pattern (Matches href and src values)
+        $pattern = '(?i)(?:href|src)\s*=\s*["'']([^"''>#\s]+)'
+        $matches = [regex]::Matches($response.Content, $pattern)
 
-        foreach ($item in $matches) {
-            $link = $item.Value
-            
-            # Resolve URL
-            if ($link -match "^//") { $link = "https:" + $link }
-            elseif ($link -match "^/") { $link = $baseUrl + $link }
-            elseif ($link -notmatch "^http") { $link = $baseUrl + "/" + $link }
+        foreach ($m in $matches) {
+            $rawLink = $m.Groups[1].Value
+            $absoluteUrl = ""
 
-            # If it's an internal link (another page), add to queue
-            if ($link.StartsWith($baseUrl)) {
-                # Filter out obvious non-html files from the page queue
-                if ($link -notmatch "\.(png|jpg|css|js|gif|svg|ico|woff|zip|pdf)$") {
-                    if (!$visited.Contains($link)) { $queue.Enqueue($link) }
+            # Resolve to Absolute URL
+            try {
+                $uriObj = New-Object System.Uri([System.Uri]$normalizedUrl, $rawLink)
+                $absoluteUrl = $uriObj.AbsoluteUri
+            } catch { continue }
+
+            # CASE A: Internal HTML (Queue it)
+            if ($absoluteUrl -match $domain -and $absoluteUrl -notmatch "\.(png|jpg|jpeg|css|js|gif|svg|ico|woff2|pdf)$") {
+                if (!$visited.Contains($absoluteUrl.Split('#')[0].TrimEnd('/'))) {
+                    $queue.Enqueue($absoluteUrl)
                 }
+            }
+
+            # CASE B: Assets (CSS, JS, Images)
+            if ($absoluteUrl -match "\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2)$") {
+                $assetFileName = ($absoluteUrl -split '/')[-1].Split('?')[0]
+                $assetPath = Join-Path $destination $assetFileName
                 
-                # If it IS an asset, download it
-                if ($link -match "\.(png|jpg|jpeg|css|js|gif|svg|ico|woff2)$") {
-                    $assetName = ($link -split '/')[-1].Split('?')[0]
-                    $assetPath = Join-Path $destination $assetName
-                    if (!(Test-Path $assetPath)) {
-                        Invoke-WebRequest -Uri $link -OutFile $assetPath -UserAgent $agent -UseBasicParsing -ErrorAction SilentlyContinue
-                        Write-Host "    -> Downloaded Asset: $assetName" -ForegroundColor Cyan
+                if (!(Test-Path $assetPath)) {
+                    try {
+                        Invoke-WebRequest -Uri $absoluteUrl -OutFile $assetPath -UserAgent $agent -Headers @{"Referer"=$normalizedUrl} -UseBasicParsing -ErrorAction SilentlyContinue
+                        Write-Host "    -> Asset: $assetFileName" -ForegroundColor Cyan
+                    } catch { 
+                        Write-Host "    [!] Skipped: $assetFileName" -ForegroundColor DarkGray
                     }
                 }
             }
         }
     } catch {
-        Write-Host "  [!] Failed to process: $currentUrl" -ForegroundColor DarkRed
+        Write-Host "  [!] Access Denied or 404: $currentUrl" -ForegroundColor Red
     }
 }
 
 Write-Host "`n------------------------------------"
-Write-Host "Deep Scan Complete. Check Downloads\SiteAssets" -ForegroundColor Yellow
+Write-Host "Process Complete. Files located in Downloads\SiteAssets" -ForegroundColor Yellow
 pause
