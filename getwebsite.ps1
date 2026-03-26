@@ -9,7 +9,8 @@ $neonG = @"
   ╚═════╝  ╚═╝ ╚═════╝  ╚═════╝  ╚═╝
 "@
 Write-Host $neonG -ForegroundColor Cyan
-Write-Host "      [ G.GUI SCRAPER V1 ]`n" -ForegroundColor White
+Write-Host "      [ G.GUI SCRAPER V2]" -ForegroundColor White
+Write-Host "Made by @Extreem`n" -ForegroundColor Gray
 
 # 2. Setup
 $inputUrl = Read-Host "Enter the website URL"
@@ -36,13 +37,13 @@ while ($queue.Count -gt 0) {
         Write-Host "[SCANNING] $normalizedUrl" -ForegroundColor Gray
         $response = Invoke-WebRequest -Uri $normalizedUrl -UserAgent $agent -UseBasicParsing -ErrorAction Stop
         
-        # --- Handle Folder Structure for HTML ---
+        # --- Handle Folder Structure & Spaces ---
         $uri = [System.Uri]$normalizedUrl
-        $localPath = $uri.AbsolutePath.Trim('/')
+        # Unescape converts %20 back to spaces for Windows
+        $localPath = [uri]::UnescapeDataString($uri.AbsolutePath).Trim('/')
         
-        # If it's a directory or root, call it index.html
         $relativeFile = if ([string]::IsNullOrWhiteSpace($localPath)) { "index.html" } else { $localPath }
-        if ($relativeFile -notmatch "\.(html|php|asp)$") { $relativeFile += ".html" }
+        if ($relativeFile -notmatch "\.(html|php|asp|css|js|png|jpg|jpeg|gif|svg|ico)$") { $relativeFile += ".html" }
         
         $fullLocalPath = Join-Path $rootDestination $relativeFile
         $parentDir = Split-Path $fullLocalPath -Parent
@@ -51,18 +52,19 @@ while ($queue.Count -gt 0) {
         $response.Content | Out-File -FilePath $fullLocalPath -Encoding utf8
         Write-Host "  [+] Saved: $relativeFile" -ForegroundColor Green
 
-        # --- Scan for Assets & Links ---
-        $pattern = '(?i)(?:href|src)\s*=\s*["'']([^"''>#\s]+)'
+        # --- Enhanced Scan (Captures spaces within quotes) ---
+        $pattern = '(?i)(?:href|src)\s*=\s*["'']([^"''>#]+)'
         $matches = [regex]::Matches($response.Content, $pattern)
 
         foreach ($m in $matches) {
             try {
-                $rawLink = $m.Groups[1].Value
+                $rawLink = $m.Groups[1].Value.Trim()
+                # Resolve to absolute URI (handles the heavy lifting of relative paths)
                 $uriObj = New-Object System.Uri([System.Uri]$normalizedUrl, $rawLink)
                 $absoluteUrl = $uriObj.AbsoluteUri
 
                 # CASE A: Internal HTML Links
-                if ($absoluteUrl -match $domain -and $absoluteUrl -notmatch "\.(png|jpg|jpeg|css|js|gif|svg|ico|woff2|pdf)$") {
+                if ($absoluteUrl -match [regex]::Escape($domain) -and $absoluteUrl -notmatch "\.(png|jpg|jpeg|css|js|gif|svg|ico|woff2|pdf)$") {
                     $cleanTarget = $absoluteUrl.Split('#')[0].TrimEnd('/')
                     if (!$visited.Contains($cleanTarget)) { $queue.Enqueue($absoluteUrl) }
                 }
@@ -70,7 +72,8 @@ while ($queue.Count -gt 0) {
                 # CASE B: Assets (CSS, JS, Images)
                 if ($absoluteUrl -match "\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2)$") {
                     $assetUri = [System.Uri]$absoluteUrl
-                    $assetRelativePath = $assetUri.AbsolutePath.TrimStart('/')
+                    # Convert URL path to a clean Windows path string
+                    $assetRelativePath = [uri]::UnescapeDataString($assetUri.AbsolutePath).TrimStart('/')
                     $assetLocalPath = Join-Path $rootDestination $assetRelativePath
                     
                     if (!(Test-Path $assetLocalPath)) {
@@ -89,5 +92,5 @@ while ($queue.Count -gt 0) {
 }
 
 Write-Host "`n------------------------------------"
-Write-Host "Structure Mirroring Complete." -ForegroundColor Yellow
+Write-Host "Process Complete." -ForegroundColor Yellow
 pause
