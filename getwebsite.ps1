@@ -9,8 +9,8 @@ $neonG = @"
   ╚═════╝  ╚═╝ ╚═════╝  ╚═════╝  ╚═╝
 "@
 Write-Host $neonG -ForegroundColor Cyan
-Write-Host "      [ G.GUI SCRAPER V2.2]" -ForegroundColor White
-Write-Host "By @Extreem`n" -ForegroundColor Gray
+Write-Host "      [ G.GUI SCRAPER V2.1 ]" -ForegroundColor White
+Write-Host "      By Extreem`n" -ForegroundColor Gray
 
 # 2. Setup
 $inputUrl = Read-Host "Enter the website URL"
@@ -26,38 +26,42 @@ $queue = [System.Collections.Generic.Queue[string]]::new()
 $queue.Enqueue($baseUrl)
 $visited = [System.Collections.Generic.HashSet[string]]::new()
 
-# Define supported extensions
+# File Extensions
 $mediaExt = "\.(mp3|mp4|wav|ogg|webm|mov)$"
-$assetExt = "\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2|pdf|webmanifest)$"
+$assetExt = "\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2|pdf)$"
 $pageExt  = "\.(html|php|asp|aspx|jsp|htm)$"
 
 # 3. Execution Logic
 while ($queue.Count -gt 0) {
     $currentUrl = $queue.Dequeue()
     $normalizedUrl = $currentUrl.Split('#')[0].TrimEnd('/')
+    
     if ($visited.Contains($normalizedUrl)) { continue }
     $visited.Add($normalizedUrl) | Out-Null
 
     try {
-        Write-Host "[SCANNING] $normalizedUrl" -ForegroundColor Gray
+        Write-Host "[QUEUED: $($queue.Count)] SCANNING: $normalizedUrl" -ForegroundColor Gray
         $response = Invoke-WebRequest -Uri $normalizedUrl -UserAgent $agent -UseBasicParsing -ErrorAction Stop
         
-        # --- Handle Folder Structure & Spaces ---
+        # --- Handle File Naming ---
         $uri = [System.Uri]$normalizedUrl
         $localPath = [uri]::UnescapeDataString($uri.AbsolutePath).Trim('/')
         
         $relativeFile = if ([string]::IsNullOrWhiteSpace($localPath)) { "index.html" } else { $localPath }
-        # Ensure it ends in .html if it's a page route
-        if ($relativeFile -notmatch "$pageExt$|$assetExt$|$mediaExt$") { $relativeFile += ".html" }
         
+        # If the URL is a directory (doesn't have a file extension), save as index.html inside it
+        if ($relativeFile -notmatch "\.\w{2,4}$") { 
+            $relativeFile = Join-Path $relativeFile "index.html" 
+        }
+
         $fullLocalPath = Join-Path $rootDestination $relativeFile
         $parentDir = Split-Path $fullLocalPath -Parent
         if (!(Test-Path $parentDir)) { New-Item -ItemType Directory -Path $parentDir -Force | Out-Null }
 
         $response.Content | Out-File -FilePath $fullLocalPath -Encoding utf8
-        Write-Host "  [+] Saved: $relativeFile" -ForegroundColor Green
+        Write-Host "  [+] Mirrored: $relativeFile" -ForegroundColor Green
 
-        # --- Enhanced Scan (Matches href, src, and data-src) ---
+        # --- Enhanced Scan (Captures spaces and extensionless routes) ---
         $pattern = '(?i)(?:href|src|data-src)\s*=\s*["'']([^"''>#]+)'
         $matches = [regex]::Matches($response.Content, $pattern)
 
@@ -67,26 +71,29 @@ while ($queue.Count -gt 0) {
                 $uriObj = New-Object System.Uri([System.Uri]$normalizedUrl, $rawLink)
                 $absoluteUrl = $uriObj.AbsoluteUri
 
-                # CASE A: Internal HTML Links (Keep Crawling)
+                # Ensure we stay on the same domain
                 if ($absoluteUrl -match [regex]::Escape($domain)) {
-                    if ($absoluteUrl -notmatch "$assetExt$|$mediaExt$") {
-                        $cleanTarget = $absoluteUrl.Split('#')[0].TrimEnd('/')
-                        if (!$visited.Contains($cleanTarget)) { $queue.Enqueue($absoluteUrl) }
-                    }
-                }
-
-                # CASE B: Assets & Media (Download)
-                if ($absoluteUrl -match "$assetExt$|$mediaExt$") {
-                    $assetUri = [System.Uri]$absoluteUrl
-                    $assetRelativePath = [uri]::UnescapeDataString($assetUri.AbsolutePath).TrimStart('/')
-                    $assetLocalPath = Join-Path $rootDestination $assetRelativePath
                     
-                    if (!(Test-Path $assetLocalPath)) {
-                        $assetDir = Split-Path $assetLocalPath -Parent
-                        if (!(Test-Path $assetDir)) { New-Item -ItemType Directory -Path $assetDir -Force | Out-Null }
+                    # CASE A: Media & Assets
+                    if ($absoluteUrl -match "$assetExt$|$mediaExt$") {
+                        $assetUri = [System.Uri]$absoluteUrl
+                        $assetPath = [uri]::UnescapeDataString($assetUri.AbsolutePath).TrimStart('/')
+                        $destPath = Join-Path $rootDestination $assetPath
                         
-                        Write-Host "    -> Downloading: $assetRelativePath" -ForegroundColor Cyan
-                        Invoke-WebRequest -Uri $absoluteUrl -OutFile $assetLocalPath -UserAgent $agent -UseBasicParsing -ErrorAction SilentlyContinue
+                        if (!(Test-Path $destPath)) {
+                            $destDir = Split-Path $destPath -Parent
+                            if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+                            
+                            Write-Host "    -> Download: $assetPath" -ForegroundColor Cyan
+                            Invoke-WebRequest -Uri $absoluteUrl -OutFile $destPath -UserAgent $agent -UseBasicParsing -ErrorAction SilentlyContinue
+                        }
+                    } 
+                    # CASE B: Internal Pages (the files like 'Hollow Knight.html')
+                    else {
+                        $cleanTarget = $absoluteUrl.Split('#')[0].TrimEnd('/')
+                        if (!$visited.Contains($cleanTarget)) { 
+                            $queue.Enqueue($absoluteUrl) 
+                        }
                     }
                 }
             } catch { continue }
@@ -97,5 +104,5 @@ while ($queue.Count -gt 0) {
 }
 
 Write-Host "`n------------------------------------"
-Write-Host "Deep Scan Complete. Check Downloads\SiteAssets" -ForegroundColor Yellow
+Write-Host "Deep Mirroring Complete." -ForegroundColor Yellow
 pause
